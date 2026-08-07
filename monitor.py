@@ -1,5 +1,6 @@
 import json
 import os
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -27,6 +28,9 @@ REPORT_DIR = Path("output")
 REPORT_PATH = REPORT_DIR / "latest_report.md"
 
 NCBI_BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
+REQUEST_HEADERS = {
+    "User-Agent": "journal-watch/1.0 (github-actions)",
+}
 
 
 def load_state() -> set[str]:
@@ -52,6 +56,20 @@ def build_query(journal: str, keywords: list[str], date_from: str) -> str:
     )
 
 
+def get_json(url: str, params: dict, retries: int = 3, backoff: float = 1.5) -> dict:
+    last_error = None
+    for attempt in range(1, retries + 1):
+        try:
+            resp = requests.get(url, params=params, headers=REQUEST_HEADERS, timeout=30)
+            resp.raise_for_status()
+            return resp.json()
+        except Exception as exc:
+            last_error = exc
+            if attempt < retries:
+                time.sleep(backoff * attempt)
+    raise RuntimeError(f"Request failed after {retries} attempts: {url}") from last_error
+
+
 def esearch(term: str, retmax: int) -> list[str]:
     params = {
         "db": "pubmed",
@@ -60,9 +78,7 @@ def esearch(term: str, retmax: int) -> list[str]:
         "retmax": str(retmax),
         "term": term,
     }
-    resp = requests.get(f"{NCBI_BASE}/esearch.fcgi", params=params, timeout=30)
-    resp.raise_for_status()
-    data = resp.json()
+    data = get_json(f"{NCBI_BASE}/esearch.fcgi", params=params)
     return data.get("esearchresult", {}).get("idlist", [])
 
 
@@ -74,9 +90,7 @@ def esummary(id_list: list[str]) -> list[dict]:
         "retmode": "json",
         "id": ",".join(id_list),
     }
-    resp = requests.get(f"{NCBI_BASE}/esummary.fcgi", params=params, timeout=30)
-    resp.raise_for_status()
-    data = resp.json().get("result", {})
+    data = get_json(f"{NCBI_BASE}/esummary.fcgi", params=params).get("result", {})
 
     out = []
     for uid in data.get("uids", []):
@@ -146,10 +160,14 @@ def main() -> None:
 
     for journal in JOURNALS:
         query = build_query(journal, KEYWORDS, date_from)
-        ids = esearch(query, MAX_PER_JOURNAL)
-        for item in esummary(ids):
-            if item["pmid"] not in seen:
-                new_items.append(item)
+        try:
+            ids = esearch(query, MAX_PER_JOURNAL)
+            for item in esummary(ids):
+                if item["pmid"] not in seen:
+                    new_items.append(item)
+        except Exception as exc:
+            # Skip a failed journal query instead of failing the entire workflow.
+            print(f"[WARN] journal query failed: {journal} | {exc}")
 
     # De-duplicate by PMID inside this run.
     deduped = {item["pmid"]: item for item in new_items}
