@@ -5,6 +5,23 @@ on:
     # UTC 00:00 = Beijing 08:00
     - cron: "0 0 * * *"
   workflow_dispatch:
+    inputs:
+      query_mode:
+        description: "Query mode: manual or builder"
+        required: false
+        default: ""
+      query_manual:
+        description: "Manual PubMed query"
+        required: false
+        default: ""
+      query_builder:
+        description: "Builder-generated query"
+        required: false
+        default: ""
+      lookback_hours:
+        description: "Lookback window in hours"
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -29,9 +46,12 @@ jobs:
       - name: Run monitor
         env:
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
-          LOOKBACK_HOURS: "72"
+          LOOKBACK_HOURS: ${{ github.event.inputs.lookback_hours || vars.LOOKBACK_HOURS || '72' }}
           MAX_PER_JOURNAL: "20"
           REPORT_MODE: ${{ vars.REPORT_MODE || 'monitor' }}
+          QUERY_MODE: ${{ github.event.inputs.query_mode || vars.QUERY_MODE || '' }}
+          QUERY_MANUAL: ${{ github.event.inputs.query_manual || vars.QUERY_MANUAL || '' }}
+          QUERY_BUILDER: ${{ github.event.inputs.query_builder || vars.QUERY_BUILDER || '' }}
         run: |
           python monitor.py
 
