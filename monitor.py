@@ -80,6 +80,8 @@ KEYWORDS = [
 
 LOOKBACK_HOURS = int(os.getenv("LOOKBACK_HOURS", "72"))
 MAX_PER_JOURNAL = int(os.getenv("MAX_PER_JOURNAL", "20"))
+REPORT_MODE = os.getenv("REPORT_MODE", "monitor").strip().lower()
+SOURCE_CHECK_MODES = {"source_check", "sources_check", "check_sources"}
 
 REPORT_DIR = Path("output")
 
@@ -334,8 +336,9 @@ def in_lookback_window(item_dt: datetime | None, cutoff: datetime) -> bool:
     return item_dt >= cutoff
 
 
-def fetch_official_website_items(cutoff: datetime) -> list[dict[str, Any]]:
+def fetch_official_website_items(cutoff: datetime) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     all_items: list[dict[str, Any]] = []
+    source_statuses: list[dict[str, Any]] = []
     for journal, feeds in JOURNAL_WEBSITE_FEEDS.items():
         success = False
         for feed_url in feeds:
@@ -348,13 +351,34 @@ def fetch_official_website_items(cutoff: datetime) -> list[dict[str, Any]]:
                     and in_lookback_window(item.get("published_at"), cutoff)
                 ]
                 all_items.extend(filtered)
+                source_statuses.append(
+                    {
+                        "family": journal,
+                        "url": feed_url,
+                        "status": "available",
+                        "item_count": len(filtered),
+                        "raw_count": len(raw_items),
+                        "reason": "",
+                    }
+                )
                 success = True
-                break
+                if REPORT_MODE not in SOURCE_CHECK_MODES:
+                    break
             except Exception as exc:
+                source_statuses.append(
+                    {
+                        "family": journal,
+                        "url": feed_url,
+                        "status": "unavailable",
+                        "item_count": 0,
+                        "raw_count": 0,
+                        "reason": str(exc),
+                    }
+                )
                 print(f"[WARN] feed failed: {journal} | {feed_url} | {exc}")
         if not success:
             print(f"[WARN] all feeds failed for: {journal}")
-    return all_items
+    return all_items, source_statuses
 
 
 def deduplicate_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -385,18 +409,42 @@ def send_webhook(text: str) -> None:
         pass
 
 
-def write_report(items: list[dict], generated_at: datetime) -> None:
+def write_report(items: list[dict], generated_at: datetime, source_statuses: list[dict[str, Any]]) -> Path:
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
-    report_name = f"report_{generated_at.strftime('%Y%m%d_%H%M%SZ')}.md"
+    report_name = f"report_{generated_at.strftime('%Y%m%d_%H%M%SZ')}_{REPORT_MODE}.md"
     report_path = REPORT_DIR / report_name
     lines = [
         "# Journal Watch Report",
         "",
         f"- Generated (UTC): {generated_at.strftime('%Y-%m-%d %H:%M:%S')}",
+        f"- Mode: {REPORT_MODE}",
         f"- Lookback hours: {LOOKBACK_HOURS}",
         f"- Matched records: {len(items)}",
         "",
     ]
+
+    if source_statuses or REPORT_MODE in SOURCE_CHECK_MODES:
+        available = [s for s in source_statuses if s.get("status") == "available"]
+        unavailable = [s for s in source_statuses if s.get("status") != "available"]
+        lines.append("## Source Availability")
+        lines.append("")
+        lines.append("### Available")
+        if available:
+            for source in available:
+                lines.append(
+                    f"- {source['family']} | {source['url']} | matched={source.get('item_count', 0)} | raw={source.get('raw_count', 0)}"
+                )
+        else:
+            lines.append("- None")
+        lines.append("")
+        lines.append("### Unavailable")
+        if unavailable:
+            for source in unavailable:
+                reason = source.get("reason", "").strip().replace("\n", " ")
+                lines.append(f"- {source['family']} | {source['url']} | {reason}")
+        else:
+            lines.append("- None")
+        lines.append("")
 
     if not items:
         lines.append("No new records found.")
@@ -433,12 +481,12 @@ def main() -> None:
             # Skip a failed journal query instead of failing the entire workflow.
             print(f"[WARN] journal query failed: {family_name} | {exc}")
 
-    website_items = fetch_official_website_items(cutoff)
+    website_items, source_statuses = fetch_official_website_items(cutoff)
     matched_items.extend(website_items)
     matched_items = deduplicate_items(matched_items)
     matched_items.sort(key=lambda x: x.get("published_at") or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
 
-    report_path = write_report(matched_items, now_utc)
+    report_path = write_report(matched_items, now_utc, source_statuses)
 
     if matched_items:
         top = matched_items[:5]

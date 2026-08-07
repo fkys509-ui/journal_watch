@@ -31,6 +31,7 @@ jobs:
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
           LOOKBACK_HOURS: "72"
           MAX_PER_JOURNAL: "20"
+          REPORT_MODE: ${{ vars.REPORT_MODE || 'monitor' }}
         run: |
           python monitor.py
 
