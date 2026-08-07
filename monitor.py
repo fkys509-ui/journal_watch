@@ -14,10 +14,10 @@ JOURNALS = [
 ]
 
 KEYWORDS = [
-    "cholecystitis",
-    "cholangitis",
-    "biliary drainage",
-    "ERCP",
+    "interventional",
+    "coronary",
+    "AI",
+    "artificial intelligence",
 ]
 
 DAYS_BACK = int(os.getenv("DAYS_BACK", "3"))
