@@ -14,8 +14,6 @@ JOURNALS = [
 ]
 
 KEYWORDS = [
-    "interventional",
-    "coronary",
     "AI",
     "artificial intelligence",
 ]
