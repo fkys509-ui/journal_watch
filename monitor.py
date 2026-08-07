@@ -1,4 +1,5 @@
 import os
+import re
 import time
 from email.utils import parsedate_to_datetime
 from datetime import datetime, timedelta, timezone
@@ -217,7 +218,20 @@ def fetch_feed_items(feed_url: str, journal: str) -> list[dict[str, Any]]:
 
 def keyword_match_title(title: str, keywords: list[str]) -> bool:
     t = title.lower()
-    return any(k.lower() in t for k in keywords)
+    for kw in keywords:
+        k = kw.lower().strip()
+        if not k:
+            continue
+
+        # Avoid false positives like "maintenance" or "airway" when keyword is AI.
+        if k == "ai":
+            if re.search(r"(?<![a-z0-9])ai(?![a-z0-9])", t):
+                return True
+            continue
+
+        if k in t:
+            return True
+    return False
 
 
 def in_lookback_window(item_dt: datetime | None, cutoff: datetime) -> bool:
