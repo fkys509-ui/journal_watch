@@ -9,12 +9,69 @@ from xml.etree import ElementTree as ET
 
 import requests
 
-JOURNALS = [
-    "The Lancet",
-    "JAMA",
-    "BMJ",
-    "NEJM",
-]
+PUBMED_JOURNAL_FAMILIES = {
+    "Lancet": {
+        "journal": [
+            "Lancet*",
+            "EClinicalMedicine",
+            "Lancet Regional Health*",
+        ],
+        "abbr": [
+            "Lancet*",
+            "EClinicalMedicine",
+            "Lancet Reg Health*",
+        ],
+    },
+    "JAMA": {
+        "journal": [
+            "JAMA*",
+            "JAMA Network Open",
+        ],
+        "abbr": [
+            "JAMA*",
+            "JAMA Netw Open",
+        ],
+    },
+    "BMJ": {
+        "journal": [
+            "BMJ*",
+            "BMJ Open*",
+            "Gut",
+            "Thorax",
+            "Heart",
+            "Journal of Medical Ethics",
+            "Journal of Epidemiology and Community Health",
+            "British Journal of Ophthalmology",
+            "Journal of Neurology, Neurosurgery, and Psychiatry",
+        ],
+        "abbr": [
+            "BMJ*",
+            "BMJ Open*",
+            "Gut",
+            "Thorax",
+            "Heart",
+            "J Med Ethics",
+            "J Epidemiol Community Health",
+            "Br J Ophthalmol",
+            "J Neurol Neurosurg Psychiatry",
+        ],
+    },
+    "NEJM": {
+        "journal": [
+            "New England Journal of Medicine",
+            "NEJM*",
+            "NEJM Evidence",
+            "NEJM AI",
+            "NEJM Catalyst*",
+        ],
+        "abbr": [
+            "N Engl J Med*",
+            "NEJM*",
+            "NEJM Evid",
+            "NEJM AI",
+        ],
+    },
+}
 
 KEYWORDS = [
     "AI",
@@ -32,19 +89,39 @@ REQUEST_HEADERS = {
 }
 
 JOURNAL_WEBSITE_FEEDS = {
-    "The Lancet": [
+    "Lancet": [
         "https://www.thelancet.com/rssfeed/lancet_current.xml",
+        "https://www.thelancet.com/rssfeed/lanres_current.xml",
+        "https://www.thelancet.com/rssfeed/lanpub_current.xml",
+        "https://www.thelancet.com/rssfeed/landig_current.xml",
+        "https://www.thelancet.com/rssfeed/eclinm_current.xml",
     ],
     "JAMA": [
-        "https://jamanetwork.com/rss/site_3.xml?feed=rss",
+        "https://jamanetwork.com/rss/site_3.xml",
         "https://jamanetwork.com/rss/site_3",
+        "https://jamanetwork.com/rss/site_4.xml",
+        "https://jamanetwork.com/rss/site_5.xml",
+        "https://jamanetwork.com/rss/site_6.xml",
+        "https://jamanetwork.com/rss/site_7.xml",
+        "https://jamanetwork.com/rss/site_8.xml",
     ],
     "BMJ": [
         "https://www.bmj.com/rss.xml",
-        "https://www.bmj.com/rss/news.xml",
+        "https://bmjopen.bmj.com/rss/current.xml",
+        "https://bmjmedicine.bmj.com/rss/current.xml",
+        "https://qualitysafety.bmj.com/rss/current.xml",
+        "https://heart.bmj.com/rss/current.xml",
+        "https://thorax.bmj.com/rss/current.xml",
+        "https://gut.bmj.com/rss/current.xml",
+        "https://jme.bmj.com/rss/current.xml",
+        "https://jech.bmj.com/rss/current.xml",
+        "https://jnnp.bmj.com/rss/current.xml",
     ],
     "NEJM": [
         "https://www.nejm.org/action/showFeed?type=etoc&feed=rss&jc=nejm",
+        "https://www.nejm.org/action/showFeed?type=etoc&feed=rss&jc=NEJMEvidence",
+        "https://www.nejm.org/action/showFeed?type=etoc&feed=rss&jc=NEJMcatalyst",
+        "https://www.nejm.org/action/showFeed?type=etoc&feed=rss&jc=NEJMai",
     ],
 }
 
@@ -88,10 +165,27 @@ def parse_feed_datetime(text: str) -> datetime | None:
         return None
 
 
-def build_query(journal: str, keywords: list[str], date_from: str) -> str:
+def format_pubmed_field_term(term: str, field: str) -> str:
+    value = term.strip()
+    if "*" in value:
+        return f"{value}[{field}]"
+    return f'"{value}"[{field}]'
+
+
+def build_journal_family_clause(family_terms: dict[str, list[str]]) -> str:
+    clauses = []
+    for term in family_terms.get("journal", []):
+        clauses.append(format_pubmed_field_term(term, "Journal"))
+    for term in family_terms.get("abbr", []):
+        clauses.append(format_pubmed_field_term(term, "TA"))
+    return "(" + " OR ".join(clauses) + ")"
+
+
+def build_query(family_terms: dict[str, list[str]], keywords: list[str], date_from: str) -> str:
     kw_expr = " OR ".join([f'"{k}"[Title]' for k in keywords])
+    family_expr = build_journal_family_clause(family_terms)
     return (
-        f'"{journal}"[Journal] AND ({kw_expr}) '
+        f"{family_expr} AND ({kw_expr}) "
         f'AND ("{date_from}"[Date - Publication] : "3000"[Date - Publication])'
     )
 
@@ -328,8 +422,8 @@ def main() -> None:
 
     matched_items: list[dict[str, Any]] = []
 
-    for journal in JOURNALS:
-        query = build_query(journal, KEYWORDS, date_from)
+    for family_name, family_terms in PUBMED_JOURNAL_FAMILIES.items():
+        query = build_query(family_terms, KEYWORDS, date_from)
         try:
             ids = esearch(query, MAX_PER_JOURNAL)
             for item in esummary(ids):
@@ -337,7 +431,7 @@ def main() -> None:
                     matched_items.append(item)
         except Exception as exc:
             # Skip a failed journal query instead of failing the entire workflow.
-            print(f"[WARN] journal query failed: {journal} | {exc}")
+            print(f"[WARN] journal query failed: {family_name} | {exc}")
 
     website_items = fetch_official_website_items(cutoff)
     matched_items.extend(website_items)
