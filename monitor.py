@@ -195,13 +195,33 @@ def build_journal_family_clause(family_terms: dict[str, list[str]]) -> str:
 
 
 def default_query_expression(keywords: list[str]) -> str:
-    return " OR ".join([f'"{k}"[Title]' for k in keywords])
+    return " OR ".join([f'"{keyword}"[Title]' if " " in keyword else f"{keyword}[Title]" for keyword in keywords])
 
 
 def get_active_query_expression(keywords: list[str]) -> str:
     expression = QUERY_BUILDER or default_query_expression(keywords)
-    expression = re.sub(r"\[(?:Title/Abstract|Abstract)\]", "[Title]", expression, flags=re.IGNORECASE)
-    return expression
+    if len(expression) > 1000:
+        raise ValueError("QUERY_BUILDER must not exceed 1000 characters")
+
+    fields = re.findall(r"\[([^\]]+)\]", expression)
+    if any(field.strip().lower() != "title" for field in fields):
+        raise ValueError("QUERY_BUILDER only supports the [Title] field")
+    if expression.count("(") != expression.count(")"):
+        raise ValueError("QUERY_BUILDER contains unmatched parentheses")
+
+    flat_expression = expression.replace("(", " ").replace(")", " ")
+    atom = r'(?:"[^"\r\n]+"|[\w*.-]+)\[Title\]'
+    if not re.fullmatch(rf"\s*{atom}(?:\s+(?:AND|OR|NOT)\s+{atom})*\s*", flat_expression, flags=re.IGNORECASE):
+        raise ValueError("QUERY_BUILDER must contain [Title] terms joined by AND, OR, or NOT")
+
+    expression = re.sub(r"\[title\]", "[Title]", expression, flags=re.IGNORECASE)
+    expression = re.sub(
+        r"\b(and|or|not)\b",
+        lambda match: match.group(1).upper(),
+        expression,
+        flags=re.IGNORECASE,
+    )
+    return expression.strip()
 
 
 def resolve_date_range(now_utc: datetime) -> tuple[datetime, datetime, str, str]:
