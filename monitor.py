@@ -35,25 +35,9 @@ PUBMED_JOURNAL_FAMILIES = {
     "BMJ": {
         "journal": [
             "BMJ*",
-            "BMJ Open*",
-            "Gut",
-            "Thorax",
-            "Heart",
-            "Journal of Medical Ethics",
-            "Journal of Epidemiology and Community Health",
-            "British Journal of Ophthalmology",
-            "Journal of Neurology, Neurosurgery, and Psychiatry",
         ],
         "abbr": [
             "BMJ*",
-            "BMJ Open*",
-            "Gut",
-            "Thorax",
-            "Heart",
-            "J Med Ethics",
-            "J Epidemiol Community Health",
-            "Br J Ophthalmol",
-            "J Neurol Neurosurg Psychiatry",
         ],
     },
     "NEJM": {
@@ -122,13 +106,6 @@ JOURNAL_WEBSITE_FEEDS = {
         "https://www.bmj.com/rss.xml",
         "https://bmjopen.bmj.com/rss/current.xml",
         "https://bmjmedicine.bmj.com/rss/current.xml",
-        "https://qualitysafety.bmj.com/rss/current.xml",
-        "https://heart.bmj.com/rss/current.xml",
-        "https://thorax.bmj.com/rss/current.xml",
-        "https://gut.bmj.com/rss/current.xml",
-        "https://jme.bmj.com/rss/current.xml",
-        "https://jech.bmj.com/rss/current.xml",
-        "https://jnnp.bmj.com/rss/current.xml",
     ],
     "NEJM": [
         "https://www.nejm.org/action/showFeed?type=etoc&feed=rss&jc=nejm",
@@ -421,6 +398,96 @@ def keyword_match_title(title: str, keywords: list[str]) -> bool:
     return False
 
 
+def title_term_matches(title: str, term: str) -> bool:
+    value = term.strip().strip('"').casefold()
+    if not value:
+        return False
+
+    pattern = re.escape(value).replace(r"\*", r"[a-z0-9]*")
+    return re.search(rf"(?<![a-z0-9]){pattern}(?![a-z0-9])", title.casefold()) is not None
+
+
+def title_query_matches(title: str, query_expr: str) -> bool:
+    token_pattern = re.compile(
+        r'\(|\)|\bAND\b|\bOR\b|\bNOT\b|((?:"[^"\r\n]+"|[\w*.-]+)\[Title\])',
+        flags=re.IGNORECASE,
+    )
+    tokens = [match.group(0) for match in token_pattern.finditer(query_expr)]
+
+    def evaluate_group(index: int) -> tuple[bool, int]:
+        value: bool | None = None
+        operator = ""
+
+        while index < len(tokens):
+            token = tokens[index]
+            upper = token.upper()
+            if token == ")":
+                return bool(value), index + 1
+            if upper in {"AND", "OR", "NOT"}:
+                operator = upper
+                index += 1
+                continue
+            if token == "(":
+                operand, index = evaluate_group(index + 1)
+            else:
+                term = re.sub(r"\[Title\]$", "", token, flags=re.IGNORECASE)
+                operand = title_term_matches(title, term)
+                index += 1
+
+            if value is None:
+                value = operand
+            elif operator == "AND":
+                value = value and operand
+            elif operator == "OR":
+                value = value or operand
+            elif operator == "NOT":
+                value = value and not operand
+            else:
+                return False, len(tokens)
+            operator = ""
+
+        return bool(value), index
+
+    result, final_index = evaluate_group(0)
+    return result and final_index == len(tokens)
+
+
+def normalize_journal_name(value: str) -> str:
+    normalized = re.sub(r"[^a-z0-9]+", " ", value.casefold()).strip()
+    return normalized[4:] if normalized.startswith("the ") else normalized
+
+
+def journal_matches_family(journal: str, family_terms: dict[str, list[str]]) -> bool:
+    normalized_journal = normalize_journal_name(journal)
+    for raw_term in family_terms.get("journal", []):
+        wildcard = raw_term.endswith("*")
+        normalized_term = normalize_journal_name(raw_term.rstrip("*"))
+        if wildcard and normalized_journal.startswith(normalized_term):
+            return True
+        if not wildcard and normalized_journal == normalized_term:
+            return True
+    return False
+
+
+def validate_pubmed_items(
+    items: list[dict[str, Any]],
+    query_expr: str,
+    family_terms: dict[str, list[str]],
+) -> list[dict[str, Any]]:
+    validated = []
+    for item in items:
+        title = item.get("title", "")
+        journal = item.get("journal", "")
+        if not title_query_matches(title, query_expr):
+            print(f"[WARN] dropped PubMed title mismatch: PMID={item.get('pmid', '')} | {title}")
+            continue
+        if not journal_matches_family(journal, family_terms):
+            print(f"[WARN] dropped PubMed journal mismatch: PMID={item.get('pmid', '')} | {journal}")
+            continue
+        validated.append(item)
+    return validated
+
+
 def in_date_range(item_dt: datetime | None, range_start: datetime, range_end_exclusive: datetime) -> bool:
     if item_dt is None:
         return False
@@ -635,7 +702,8 @@ def main() -> None:
         query = build_query(family_terms, active_query_expr, date_from, date_to)
         try:
             ids = esearch(query, MAX_PER_JOURNAL)
-            matched_items.extend(esummary(ids))
+            pubmed_items = validate_pubmed_items(esummary(ids), active_query_expr, family_terms)
+            matched_items.extend(pubmed_items)
         except Exception as exc:
             # Skip a failed journal query instead of failing the entire workflow.
             print(f"[WARN] journal query failed: {family_name} | {exc}")
