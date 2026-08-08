@@ -275,9 +275,11 @@ def extract_keywords_for_title_filter(query_expr: str, fallback: list[str]) -> l
 
 def build_query(family_terms: dict[str, list[str]], query_expr: str, date_from: str, date_to: str) -> str:
     family_expr = build_journal_family_clause(family_terms)
+    pubmed_date_from = (datetime.strptime(date_from, "%Y-%m-%d").date() - timedelta(days=1)).isoformat()
+    pubmed_date_to = (datetime.strptime(date_to, "%Y-%m-%d").date() + timedelta(days=1)).isoformat()
     return (
         f"{family_expr} AND ({query_expr}) "
-        f'AND ("{date_from}"[Date - Publication] : "{date_to}"[Date - Publication])'
+        f'AND ("{pubmed_date_from}"[Date - Publication] : "{pubmed_date_to}"[Date - Publication])'
     )
 
 
@@ -575,6 +577,8 @@ def write_report(
         "- 检索期刊范围：四大医学顶刊及其全部子刊；",
         f"- 检索关键词策略：{active_query}；",
         f"- 检索时间范围：{date_from} 至 {date_to}。",
+        "- 时间字段说明：[Time] 表示 PubMed Publication Date [dp]，不代表其他 PubMed 时间字段。",
+        f"- PubMed 实际检索范围：{(datetime.strptime(date_from, '%Y-%m-%d').date() - timedelta(days=1)).isoformat()} 至 {(datetime.strptime(date_to, '%Y-%m-%d').date() + timedelta(days=1)).isoformat()}（为降低时区边界漏检风险，用户输入范围前后各扩展 1 天）。",
         "",
     ]
 
