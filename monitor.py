@@ -87,12 +87,11 @@ def parse_int_env(name: str, default: int) -> int:
         return default
     return value
 
-LOOKBACK_HOURS = parse_int_env("LOOKBACK_HOURS", 72)
 MAX_PER_JOURNAL = parse_int_env("MAX_PER_JOURNAL", 20)
 REPORT_MODE = os.getenv("REPORT_MODE", "monitor").strip().lower()
-QUERY_MODE = os.getenv("QUERY_MODE", "").strip().lower()
-QUERY_MANUAL = os.getenv("QUERY_MANUAL", "").strip()
 QUERY_BUILDER = os.getenv("QUERY_BUILDER", "").strip()
+DATE_FROM = os.getenv("DATE_FROM", "").strip()
+DATE_TO = os.getenv("DATE_TO", "").strip()
 SOURCE_CHECK_MODES = {"source_check", "sources_check", "check_sources"}
 
 REPORT_DIR = Path("output")
@@ -200,11 +199,31 @@ def default_query_expression(keywords: list[str]) -> str:
 
 
 def get_active_query_expression(keywords: list[str]) -> str:
-    if QUERY_MODE == "manual" and QUERY_MANUAL:
-        return QUERY_MANUAL
-    if QUERY_MODE == "builder" and QUERY_BUILDER:
-        return QUERY_BUILDER
-    return default_query_expression(keywords)
+    expression = QUERY_BUILDER or default_query_expression(keywords)
+    expression = re.sub(r"\[(?:Title/Abstract|Abstract)\]", "[Title]", expression, flags=re.IGNORECASE)
+    return expression
+
+
+def resolve_date_range(now_utc: datetime) -> tuple[datetime, datetime, str, str]:
+    default_to = now_utc.date()
+    default_from = default_to - timedelta(days=2)
+
+    try:
+        date_from = datetime.strptime(DATE_FROM, "%Y-%m-%d").date() if DATE_FROM else default_from
+    except ValueError:
+        date_from = default_from
+
+    try:
+        date_to = datetime.strptime(DATE_TO, "%Y-%m-%d").date() if DATE_TO else default_to
+    except ValueError:
+        date_to = default_to
+
+    if date_from > date_to:
+        raise ValueError("DATE_FROM cannot be later than DATE_TO")
+
+    range_start = datetime.combine(date_from, datetime.min.time(), tzinfo=timezone.utc)
+    range_end_exclusive = datetime.combine(date_to + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
+    return range_start, range_end_exclusive, date_from.isoformat(), date_to.isoformat()
 
 
 def extract_keywords_for_title_filter(query_expr: str, fallback: list[str]) -> list[str]:
@@ -234,11 +253,11 @@ def extract_keywords_for_title_filter(query_expr: str, fallback: list[str]) -> l
     return deduped[:20] if deduped else fallback
 
 
-def build_query(family_terms: dict[str, list[str]], query_expr: str, date_from: str) -> str:
+def build_query(family_terms: dict[str, list[str]], query_expr: str, date_from: str, date_to: str) -> str:
     family_expr = build_journal_family_clause(family_terms)
     return (
         f"{family_expr} AND ({query_expr}) "
-        f'AND ("{date_from}"[Date - Publication] : "3000"[Date - Publication])'
+        f'AND ("{date_from}"[Date - Publication] : "{date_to}"[Date - Publication])'
     )
 
 
@@ -380,13 +399,17 @@ def keyword_match_title(title: str, keywords: list[str]) -> bool:
     return False
 
 
-def in_lookback_window(item_dt: datetime | None, cutoff: datetime) -> bool:
+def in_date_range(item_dt: datetime | None, range_start: datetime, range_end_exclusive: datetime) -> bool:
     if item_dt is None:
         return False
-    return item_dt >= cutoff
+    return range_start <= item_dt < range_end_exclusive
 
 
-def fetch_official_website_items(cutoff: datetime, keywords_for_filter: list[str]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def fetch_official_website_items(
+    range_start: datetime,
+    range_end_exclusive: datetime,
+    keywords_for_filter: list[str],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     all_items: list[dict[str, Any]] = []
     source_statuses: list[dict[str, Any]] = []
     for journal, feeds in JOURNAL_WEBSITE_FEEDS.items():
@@ -398,7 +421,7 @@ def fetch_official_website_items(cutoff: datetime, keywords_for_filter: list[str
                     item
                     for item in raw_items
                     if keyword_match_title(item.get("title", ""), keywords_for_filter)
-                    and in_lookback_window(item.get("published_at"), cutoff)
+                    and in_date_range(item.get("published_at"), range_start, range_end_exclusive)
                 ]
                 all_items.extend(filtered)
                 source_statuses.append(
@@ -511,7 +534,14 @@ def send_webhook(text: str) -> None:
         pass
 
 
-def write_report(items: list[dict], generated_at: datetime, source_statuses: list[dict[str, Any]], active_query: str) -> Path:
+def write_report(
+    items: list[dict],
+    generated_at: datetime,
+    source_statuses: list[dict[str, Any]],
+    active_query: str,
+    date_from: str,
+    date_to: str,
+) -> Path:
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
     report_name = f"report_{generated_at.strftime('%Y%m%d_%H%M%SZ')}_{REPORT_MODE}.md"
     report_path = REPORT_DIR / report_name
@@ -520,9 +550,11 @@ def write_report(items: list[dict], generated_at: datetime, source_statuses: lis
         "",
         f"- Generated (UTC): {generated_at.strftime('%Y-%m-%d %H:%M:%S')}",
         f"- Mode: {REPORT_MODE}",
-        f"- Lookback hours: {LOOKBACK_HOURS}",
-        f"- Query: {active_query}",
         f"- Matched records: {len(items)}",
+        "",
+        "- 检索期刊范围：四大医学顶刊及其全部子刊；",
+        f"- 检索关键词策略：{active_query}；",
+        f"- 检索时间范围：{date_from} 至 {date_to}。",
         "",
     ]
 
@@ -569,35 +601,43 @@ def write_report(items: list[dict], generated_at: datetime, source_statuses: lis
 
 def main() -> None:
     now_utc = datetime.now(timezone.utc)
-    cutoff = now_utc - timedelta(hours=LOOKBACK_HOURS)
-    date_from = cutoff.strftime("%Y/%m/%d")
+    range_start, range_end_exclusive, date_from, date_to = resolve_date_range(now_utc)
     active_query_expr = get_active_query_expression(DEFAULT_KEYWORDS)
     keywords_for_filter = extract_keywords_for_title_filter(active_query_expr, DEFAULT_KEYWORDS)
 
     matched_items: list[dict[str, Any]] = []
 
     for family_name, family_terms in PUBMED_JOURNAL_FAMILIES.items():
-        query = build_query(family_terms, active_query_expr, date_from)
+        query = build_query(family_terms, active_query_expr, date_from, date_to)
         try:
             ids = esearch(query, MAX_PER_JOURNAL)
-            for item in esummary(ids):
-                if in_lookback_window(item.get("published_at"), cutoff):
-                    matched_items.append(item)
+            matched_items.extend(esummary(ids))
         except Exception as exc:
             # Skip a failed journal query instead of failing the entire workflow.
             print(f"[WARN] journal query failed: {family_name} | {exc}")
 
-    website_items, source_statuses = fetch_official_website_items(cutoff, keywords_for_filter)
+    website_items, source_statuses = fetch_official_website_items(
+        range_start,
+        range_end_exclusive,
+        keywords_for_filter,
+    )
     matched_items.extend(website_items)
     matched_items = deduplicate_items(matched_items)
     matched_items.sort(key=lambda x: x.get("published_at") or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
     matched_items = attach_open_access(matched_items)
 
-    report_path = write_report(matched_items, now_utc, source_statuses, active_query_expr)
+    report_path = write_report(
+        matched_items,
+        now_utc,
+        source_statuses,
+        active_query_expr,
+        date_from,
+        date_to,
+    )
 
     if matched_items:
         top = matched_items[:5]
-        msg_lines = [f"Journal Watch: {len(matched_items)} matched records in last {LOOKBACK_HOURS}h"]
+        msg_lines = [f"Journal Watch: {len(matched_items)} matched records from {date_from} to {date_to}"]
         for item in top:
             msg_lines.append(f"- {item['title'][:80]} | {item['url']}")
         send_webhook("\n".join(msg_lines))

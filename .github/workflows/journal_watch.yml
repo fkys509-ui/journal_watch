@@ -6,20 +6,16 @@ on:
     - cron: "0 0 * * *"
   workflow_dispatch:
     inputs:
-      query_mode:
-        description: "Query mode: manual or builder"
-        required: false
-        default: ""
-      query_manual:
-        description: "Manual PubMed query"
-        required: false
-        default: ""
       query_builder:
-        description: "Builder-generated query"
+        description: "Title-only keyword query"
         required: false
         default: ""
-      lookback_hours:
-        description: "Lookback window in hours"
+      date_from:
+        description: "Start date (YYYY-MM-DD)"
+        required: false
+        default: ""
+      date_to:
+        description: "End date (YYYY-MM-DD)"
         required: false
         default: ""
 
@@ -46,12 +42,11 @@ jobs:
       - name: Run monitor
         env:
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
-          LOOKBACK_HOURS: ${{ github.event.inputs.lookback_hours || vars.LOOKBACK_HOURS || '72' }}
           MAX_PER_JOURNAL: "20"
           REPORT_MODE: ${{ vars.REPORT_MODE || 'monitor' }}
-          QUERY_MODE: ${{ github.event.inputs.query_mode || vars.QUERY_MODE || '' }}
-          QUERY_MANUAL: ${{ github.event.inputs.query_manual || vars.QUERY_MANUAL || '' }}
           QUERY_BUILDER: ${{ github.event.inputs.query_builder || vars.QUERY_BUILDER || '' }}
+          DATE_FROM: ${{ github.event.inputs.date_from || '' }}
+          DATE_TO: ${{ github.event.inputs.date_to || '' }}
         run: |
           python monitor.py
 
