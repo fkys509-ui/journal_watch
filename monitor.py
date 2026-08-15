@@ -55,6 +55,51 @@ PUBMED_JOURNAL_FAMILIES = {
             "NEJM AI",
         ],
     },
+    "Nature": {
+        "journal": [
+            "Nature",
+            "Nature*",
+        ],
+        "abbr": [
+            "Nature*",
+        ],
+    },
+    "Science": {
+        "journal": [
+            "Science",
+            "Science Advances",
+            "Science Translational Medicine",
+            "Science Signaling",
+            "Science Immunology",
+            "Science Robotics",
+        ],
+        "abbr": [
+            "Science",
+            "Sci Adv",
+            "Sci Transl Med",
+            "Sci Signal",
+            "Sci Immunol",
+            "Sci Robot",
+        ],
+    },
+    "JACC": {
+        "journal": [
+            "JACC*",
+            "Journal of the American College of Cardiology*",
+        ],
+        "abbr": [
+            "J Am Coll Cardiol*",
+            "JACC*",
+        ],
+    },
+    "Circulation": {
+        "journal": [
+            "Circulation*",
+        ],
+        "abbr": [
+            "Circulation*",
+        ],
+    },
 }
 
 DEFAULT_KEYWORDS = [
@@ -112,6 +157,34 @@ JOURNAL_WEBSITE_FEEDS = {
         "https://www.nejm.org/action/showFeed?type=etoc&feed=rss&jc=NEJMEvidence",
         "https://www.nejm.org/action/showFeed?type=etoc&feed=rss&jc=NEJMcatalyst",
         "https://www.nejm.org/action/showFeed?type=etoc&feed=rss&jc=NEJMai",
+    ],
+    "Nature": [
+        "https://www.nature.com/nature.rss",
+        "https://www.nature.com/nm.rss",
+        "https://www.nature.com/nmeth.rss",
+        "https://www.nature.com/nbt.rss",
+        "https://www.nature.com/ncomms.rss",
+    ],
+    "Science": [
+        "https://www.science.org/action/showFeed?type=etoc&feed=rss&jc=science",
+        "https://www.science.org/action/showFeed?type=etoc&feed=rss&jc=sciadv",
+        "https://www.science.org/action/showFeed?type=etoc&feed=rss&jc=scitranslmed",
+        "https://www.science.org/action/showFeed?type=etoc&feed=rss&jc=scisignal",
+        "https://www.science.org/action/showFeed?type=etoc&feed=rss&jc=sciimmunol",
+    ],
+    "JACC": [
+        "https://www.jacc.org/action/showFeed?type=etoc&feed=rss&jc=jacc",
+        "https://www.jacc.org/action/showFeed?type=etoc&feed=rss&jc=jaccas",
+        "https://www.jacc.org/action/showFeed?type=etoc&feed=rss&jc=jaccao",
+        "https://www.jacc.org/action/showFeed?type=etoc&feed=rss&jc=jaccim",
+        "https://www.jacc.org/action/showFeed?type=etoc&feed=rss&jc=jacccr",
+    ],
+    "Circulation": [
+        "https://www.ahajournals.org/action/showFeed?type=etoc&feed=rss&jc=circulation",
+        "https://www.ahajournals.org/action/showFeed?type=etoc&feed=rss&jc=circres",
+        "https://www.ahajournals.org/action/showFeed?type=etoc&feed=rss&jc=circoutcomes",
+        "https://www.ahajournals.org/action/showFeed?type=etoc&feed=rss&jc=circep",
+        "https://www.ahajournals.org/action/showFeed?type=etoc&feed=rss&jc=circheartfailure",
     ],
 }
 
@@ -634,6 +707,7 @@ def write_report(
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
     report_name = f"report_{generated_at.strftime('%Y%m%d_%H%M%SZ')}_{REPORT_MODE}.md"
     report_path = REPORT_DIR / report_name
+    family_scope_text = "、".join(PUBMED_JOURNAL_FAMILIES.keys())
     lines = [
         "# Journal Watch Report",
         "",
@@ -641,7 +715,7 @@ def write_report(
         f"- Mode: {REPORT_MODE}",
         f"- Matched records: {len(items)}",
         "",
-        "- 检索期刊范围：四大医学顶刊及其全部子刊；",
+        f"- 检索期刊范围：{family_scope_text} 系列期刊及其子刊；",
         f"- 检索关键词策略：{active_query}；",
         f"- 检索时间范围：{date_from} 至 {date_to}。",
         "- 时间字段说明：[Time] 表示 PubMed Publication Date [dp]，不代表其他 PubMed 时间字段。",
