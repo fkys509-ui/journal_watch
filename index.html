@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Journal Watch</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">Journal Watch</p>
+        <h1>最新检索报告</h1>
+        <p class="lead">浏览最新的 PubMed 与期刊官网检索结果，或跳转到 GitHub Actions 手动生成新报告。</p>
+      </div>
+      <div class="actions">
+        <a id="latestLink" class="button primary" href="#report">查看最新报告</a>
+        <button id="refreshButton" class="button" type="button">刷新报告列表</button>
+        <a class="button ghost" href="https://github.com/fkys509-ui/journal_watch/actions/workflows/journal_watch.yml" target="_blank" rel="noreferrer">手动生成新报告</a>
+      </div>
+    </header>
+
+    <section class="panel stats">
+      <div>
+        <span class="label">最新报告</span>
+        <strong id="latestName">加载中</strong>
+      </div>
+      <div>
+        <span class="label">更新时间</span>
+        <strong id="latestTime">-</strong>
+      </div>
+      <div>
+        <span class="label">历史报告</span>
+        <strong id="reportCount">-</strong>
+      </div>
+    </section>
+
+    <section class="layout">
+      <aside class="panel sidebar">
+        <div class="sidebar-head">
+          <h2>报告列表</h2>
+          <span id="statusBadge" class="badge">加载中</span>
+        </div>
+        <div id="reportList" class="report-list"></div>
+      </aside>
+
+      <section class="panel report">
+        <div class="report-head" id="report">
+          <h2>报告内容</h2>
+          <a id="openRawLink" class="text-link" href="#" target="_blank" rel="noreferrer">打开原始 Markdown</a>
+        </div>
+        <div id="reportContent" class="report-content">正在加载...</div>
+      </section>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
